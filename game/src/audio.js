@@ -139,5 +139,23 @@ export function createAudio() {
       blip(988, 0.1, 0.16, 0.1);
       blip(1175, 0.18, 0.16, 0.2);
     },
+    /** The metallic click-clack of swapping guns. */
+    swap() {
+      noiseBurst(0.05, 2600, 0.2);
+      window.setTimeout(() => noiseBurst(0.05, 1700, 0.2), 60);
+    },
+    /** A bright two-note chime for picking something up. */
+    pickup() {
+      blip(784, 0.08, 0.15);
+      blip(1175, 0.13, 0.15, 0.08);
+    },
+    /** A soft splash for hulls meeting water and crews stepping ashore. */
+    splash() {
+      noiseBurst(0.22, 900, 0.22, 'lowpass');
+    },
+    /** Race countdown: a low beep for the counts, a high one for GO. */
+    countBeep(final) {
+      blip(final ? 1180 : 590, final ? 0.22 : 0.1, 0.18);
+    },
   };
 }

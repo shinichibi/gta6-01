@@ -1,8 +1,9 @@
-// Everything drawn over the world: the HUD (cash, health, wanted stars, weapon,
-// speed), the minimap, the objective banner, Vera's phone, and the screens —
-// title, pause, and the hospital wake-up. Plain canvas, no DOM.
+// Everything drawn over the world: the HUD (cash, health, the clock, wanted stars,
+// weapon, speed), the minimap (now with its shoreline and the harbour's boats), the
+// objective banner, Vera's phone, and the screens — title, pause, and the hospital
+// wake-up. Plain canvas, no DOM.
 
-import { ROADS, WORLD } from './config.js';
+import { ROADS, SHORE, WEAPONS, WORLD } from './config.js';
 import { clamp } from './util.js';
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
@@ -50,19 +51,26 @@ function star(ctx, x, y, size, filled) {
   ctx.restore();
 }
 
-/** The minimap: the whole island in a square, roads, water, blips and the player. */
+/** The minimap: the island in its sea — shoreline, roads, blips, boats, the player. */
 export function drawMinimap(ctx, G, x, y, size) {
   const scale = size / WORLD.w;
+  // World points can sit off the island (boats, the anchored yacht): clamp blips
+  // to the map's edge rather than letting them swim off the glass.
+  const mx = (wx) => x + clamp(wx, -SHORE, WORLD.w + SHORE) * scale;
+  const my = (wy) => y + clamp(wy, -SHORE, WORLD.h + SHORE) * scale;
   ctx.save();
   ctx.beginPath();
   ctx.roundRect(x, y, size, size, 10);
   ctx.clip();
   ctx.fillStyle = '#227186';
   ctx.fillRect(x, y, size, size);
+  // The sand rim, then the land inside it.
+  ctx.fillStyle = '#e6d29b';
+  ctx.fillRect(x - SHORE * scale, y - SHORE * scale, (WORLD.w + SHORE * 2) * scale, (WORLD.h + SHORE * 2) * scale);
   ctx.fillStyle = '#b5ab90';
   ctx.fillRect(x, y, size, size);
-  ctx.fillStyle = '#8f8672';
   for (const block of G.city.blocks) {
+    ctx.fillStyle = block.use === 'park' ? '#79b657' : block.use === 'lot' || block.use === 'airfield' ? '#9aa0a4' : '#8f8672';
     ctx.fillRect(x + block.x * scale, y + block.y * scale, block.w * scale, block.h * scale);
   }
   ctx.strokeStyle = '#e8e4d2';
@@ -74,6 +82,14 @@ export function drawMinimap(ctx, G, x, y, size) {
     ctx.moveTo(x, y + c * scale);
     ctx.lineTo(x + size, y + c * scale);
     ctx.stroke();
+  }
+  // Boats ride as pale dots on the blue.
+  for (const boat of G.boats) {
+    if (boat.wrecked) continue;
+    ctx.fillStyle = boat.missionBoat ? '#f2c14e' : '#eafcff';
+    ctx.beginPath();
+    ctx.arc(mx(boat.x), my(boat.y), boat.type === 'yacht' ? 3 : 2.2, 0, Math.PI * 2);
+    ctx.fill();
   }
   // Police blips flash blue and red, the way their light bars do.
   const phase = Math.floor(G.time * 4) % 2;
@@ -94,18 +110,18 @@ export function drawMinimap(ctx, G, x, y, size) {
   const marker = G.director.marker();
   if (marker !== null) {
     const pulse = 3.6 + Math.sin(G.time * 5) * 1.1;
-    ctx.fillStyle = '#f2c14e';
+    ctx.fillStyle = marker.color ?? '#f2c14e';
     ctx.beginPath();
-    ctx.arc(x + marker.x * scale, y + marker.y * scale, pulse, 0, Math.PI * 2);
+    ctx.arc(mx(marker.x), my(marker.y), pulse, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = 'rgba(242,193,78,0.6)';
     ctx.stroke();
   }
-  // The player: a white wedge pointing the way he faces or drives.
+  // The player: a white wedge pointing the way he faces, drives or sails.
   const p = G.player;
-  const angle = p.car !== null ? p.car.angle : p.angle;
+  const angle = p.car !== null ? p.car.angle : p.boat !== null ? p.boat.angle : p.angle;
   ctx.save();
-  ctx.translate(x + p.x * scale, y + p.y * scale);
+  ctx.translate(mx(p.x), my(p.y));
   ctx.rotate(angle);
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
@@ -139,6 +155,14 @@ export function drawHud(ctx, G, w, h, prompt) {
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = `11px ${FONT}`;
   ctx.fillText(G.director.missionTitle().toUpperCase(), 30, 66);
+  // The clock, top right of the cash panel: Port Azura runs on a fast sun.
+  const hh = Math.floor(G.dayHour);
+  const mm = Math.floor((G.dayHour - hh) * 60);
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = `bold 13px ${FONT}`;
+  ctx.textAlign = 'right';
+  ctx.fillText(`${G.nightAmount > 0.5 ? '☾' : '☀'} ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, 220, 46);
+  ctx.textAlign = 'left';
   // Health bar under the cash panel.
   ctx.fillStyle = 'rgba(14,20,28,0.72)';
   ctx.beginPath();
@@ -156,22 +180,23 @@ export function drawHud(ctx, G, w, h, prompt) {
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
   ctx.font = `bold 13px ${FONT}`;
   ctx.textAlign = 'right';
-  if (p.car !== null) {
-    const speed = Math.round(Math.abs(p.car.vx * Math.cos(p.car.angle) + p.car.vy * Math.sin(p.car.angle)) * 0.36);
-    ctx.fillText(`${p.car.name} — ${speed} km/h`, w - 30, 68);
+  const vehicle = p.car !== null ? p.car : p.boat;
+  if (vehicle !== null) {
+    const speed = Math.round(Math.abs(vehicle.vx * Math.cos(vehicle.angle) + vehicle.vy * Math.sin(vehicle.angle)) * 0.36);
+    ctx.fillText(`${vehicle.name} — ${speed} km/h`, w - 30, 68);
   } else if (p.reloadT > 0) {
-    ctx.fillText('PISTOL — RELOADING…', w - 30, 68);
+    ctx.fillText(`${WEAPONS[p.weapon].name.toUpperCase()} — RELOADING…`, w - 30, 68);
   } else {
-    ctx.fillText(`PISTOL — ${p.mag} / ${p.reserve}`, w - 30, 68);
+    ctx.fillText(`${WEAPONS[p.weapon].name.toUpperCase()} — ${p.mag} / ${p.reserve}${p.hasSmg ? ' · Q ⇄' : ''}`, w - 30, 68);
   }
-  if (p.car !== null) {
+  if (vehicle !== null) {
     ctx.fillStyle = 'rgba(14,20,28,0.72)';
     ctx.beginPath();
     ctx.roundRect(w - 216, 88, 200, 10, 5);
     ctx.fill();
-    ctx.fillStyle = p.car.hp > p.car.maxHp * 0.35 ? '#7fb2e5' : '#e0483e';
+    ctx.fillStyle = vehicle.hp > vehicle.maxHp * 0.35 ? '#7fb2e5' : '#e0483e';
     ctx.beginPath();
-    ctx.roundRect(w - 214, 90, 196 * clamp(p.car.hp / p.car.maxHp, 0, 1), 6, 3);
+    ctx.roundRect(w - 214, 90, 196 * clamp(vehicle.hp / vehicle.maxHp, 0, 1), 6, 3);
     ctx.fill();
   }
 
@@ -189,6 +214,10 @@ export function drawHud(ctx, G, w, h, prompt) {
     ctx.fillStyle = t < 20 ? '#ff6b5e' : '#ffffff';
     ctx.font = `bold 17px ${FONT}`;
     ctx.fillText(`${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`, w / 2, 40 + lines.length * 19 + 8);
+  } else if (G.director.raceClock() !== null) {
+    ctx.fillStyle = '#5dff8a';
+    ctx.font = `bold 17px ${FONT}`;
+    ctx.fillText(G.director.raceClock(), w / 2, 40 + lines.length * 19 + 8);
   }
 
   // Vera's phone, bottom left: the current call line, if any.
@@ -260,15 +289,16 @@ export function drawTitle(ctx, G, w, h, hasSave, notice) {
   ctx.fillText('P O R T   A Z U R A', w / 2, h * 0.30 + 44);
   ctx.font = `16px ${FONT}`;
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.fillText('An open-world crime story: steal cars, run jobs for Vera, outrun the Azura PD.', w / 2, h * 0.30 + 76);
+  ctx.fillText('An open-world crime story: steal cars, take boats, run jobs for Vera, outrun the Azura PD.', w / 2, h * 0.30 + 76);
+  ctx.fillText('New: harbour runs, street races, the Kite SMG — and a city that lights up at night.', w / 2, h * 0.30 + 100);
   ctx.font = `bold 21px ${FONT}`;
   ctx.fillStyle = '#8be89a';
   ctx.fillText(hasSave ? 'ENTER — Continue      N — New Game' : 'ENTER — New Game', w / 2, h * 0.62);
   ctx.font = `14px ${FONT}`;
   ctx.fillStyle = 'rgba(255,255,255,0.75)';
   const controls = [
-    'WASD / Arrows — move & drive      Mouse — aim, hold to shoot      E — enter / exit car',
-    'Shift — sprint      Space — handbrake      R — reload      P / Esc — pause      M — mute',
+    'WASD / Arrows — move & drive      Mouse — aim, hold to shoot      E — enter / exit car or boat',
+    'Shift — sprint      Space — handbrake      R — reload      Q — swap gun      P / Esc — pause      M — mute',
   ];
   controls.forEach((line, i) => ctx.fillText(line, w / 2, h * 0.62 + 44 + i * 22));
   if (notice !== null) {
@@ -291,7 +321,7 @@ export function drawPause(ctx, G, w, h, notice) {
   ctx.font = `17px ${FONT}`;
   const lines = [
     `Cash $${Math.floor(G.cash).toLocaleString('en-US')} — ${G.director.missionTitle()}`,
-    '',
+    G.director.race.best !== null ? `Best race: ${G.director.race.best.toFixed(1)}s` : '',
     'P / Esc — Resume',
     'S — Save game',
     'Backspace — Restart the story',

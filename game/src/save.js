@@ -1,5 +1,7 @@
-// The saved game, in the browser's local storage: cash, story progress and where
-// Jax stood. Nothing leaves the machine; a save that does not parse is no save.
+// The saved game, in the browser's local storage: cash, story progress, whether
+// Vera's SMG has been earned, and where Jax stood. Nothing leaves the machine; a
+// save that does not parse is no save, and an old save without the newer fields
+// simply loads with their defaults.
 
 import { SAVE_KEY } from './config.js';
 
@@ -10,7 +12,7 @@ export function loadSave() {
     if (raw === null) return null;
     const data = JSON.parse(raw);
     if (typeof data.cash !== 'number' || typeof data.missionIndex !== 'number') return null;
-    return data;
+    return { ...data, hasSmg: data.hasSmg === true };
   } catch {
     return null;
   }

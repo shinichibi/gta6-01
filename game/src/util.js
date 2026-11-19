@@ -1,4 +1,19 @@
-// Small maths helpers every system shares: clamping, angles, distances.
+// Small maths helpers every system shares: clamping, angles, distances, and the
+// little deterministic hash the renderer uses to decide which windows are lit.
+
+/** A full turn, for the code that would rather not write Math.PI * 2 everywhere. */
+export const TAU = Math.PI * 2;
+
+/**
+ * A cheap, stable hash of three small integers, returned in [0, 1). The same
+ * inputs always give the same value, so seeded detail (lit windows, twinkling
+ * water) never flickers between frames.
+ */
+export function hash3(a, b, c) {
+  let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
 
 /** Keep `value` between `lo` and `hi`. */
 export function clamp(value, lo, hi) {

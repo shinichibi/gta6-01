@@ -1,10 +1,11 @@
-// The staged scenes behind ?shot=title|drive|chase|mission. Each arranges a real
+// The staged scenes behind ?shot=title|night|boat|combat. Each arranges a real
 // world (built by main.js from the same seed) into a moment worth photographing —
-// a drive across town mid-job, a three-star chase, Vera's first call — then drives
-// it with a small scripted control so the frame is a game really being played.
+// dusk over the neon strip for the cover, a two-star night chase, a skiff planing
+// along the shore at golden hour, a shootout on foot — then drives it with a small
+// scripted control so the frame is a game really being played.
 
-import { LANE_OFF, ROADS } from './config.js';
-import { createCar, createPed } from './entities.js';
+import { LANE_OFF, ROADS, WORLD, nightAmountFor } from './config.js';
+import { createBoat, createCar, createPed } from './entities.js';
 import { clamp } from './util.js';
 
 const IDLE = {
@@ -30,35 +31,46 @@ function laneControl(car, laneY, weave = 0) {
   };
 }
 
+/** Hold a shot boat on a heading along the shore, correcting toward a line of latitude. */
+function boatControl(boat, lineY) {
+  return () => {
+    const want = Math.atan2(lineY - boat.y, 620);
+    let delta = want - boat.angle;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    return { ...IDLE, throttle: 1, steer: clamp(delta * 2.2, -1, 1) };
+  };
+}
+
+/** The story is finished in the staged worlds; Vera's jobs are done, the city is open. */
+function finishStory(D) {
+  D.missionIndex = D.missions.length;
+  D.storyDone = true;
+  D.introQueuedFor = D.missions.length;
+  D.stageSetupPending = false;
+  D.taxi.cooldownT = 9999; // no fare flags a cab in a photograph
+}
+
 /** Put the world into the named scene. Called once, before the steps run. */
 export function arrangeShotScene(name, G) {
   const D = G.director;
   G.dayHour = 15.3;
   if (name === 'title') {
-    G.camera.x = 1760;
-    G.camera.y = 1470;
-    return;
-  }
-  if (name === 'drive') {
-    // Mid Package Run: the package is aboard, the garage is across town, cash is real.
-    G.cash = 640;
-    D.missionIndex = 1;
-    D.introQueuedFor = 1;
-    D.stageIndex = 1;
-    D.stageSetupPending = false;
-    D.timerLeft = 132;
-    const car = createCar('sedan', ROADS[3] - 200, ROADS[3] + LANE_OFF, 0, '#3d7bd9', G.rng);
+    // The cover: dusk on the neon strip, a Comet at the kerb, the city lighting up.
+    G.dayHour = 18.55;
+    G.nightAmount = nightAmountFor(G.dayHour);
+    G.cash = 2350;
+    finishStory(D);
+    const car = createCar('sports', ROADS[3] + 30, ROADS[3] + LANE_OFF, 0, '#d92b2b', G.rng);
     car.driver = 'player';
     G.cars.push(car);
     G.player.car = car;
     G.player.x = car.x;
     G.player.y = car.y;
-    // Company on the road: traffic on the same avenue and the crossing one.
     const company = [
-      ['hatch', ROADS[3] + 330, ROADS[3] - LANE_OFF, Math.PI],
-      ['taxi', ROADS[3] + 60, ROADS[3] - LANE_OFF, Math.PI],
-      ['sedan', ROADS[4] - LANE_OFF, ROADS[3] - 260, Math.PI / 2],
-      ['van', ROADS[3] - 480, ROADS[3] + LANE_OFF, 0],
+      ['taxi', ROADS[3] - 330, ROADS[3] - LANE_OFF, Math.PI],
+      ['sedan', ROADS[3] + 420, ROADS[3] - LANE_OFF, Math.PI],
+      ['pickup', ROADS[2] + LANE_OFF, ROADS[3] + 330, Math.PI / 2],
     ];
     for (const [type, x, y, angle] of company) {
       const other = createCar(type, x, y, angle, null, G.rng);
@@ -66,70 +78,122 @@ export function arrangeShotScene(name, G) {
       other.ai.node = [3, 3];
       G.cars.push(other);
     }
+    for (const [x, y] of [[ROADS[3] - 120, ROADS[3] - 76], [ROADS[3] + 190, ROADS[3] + 76], [ROADS[3] + 90, ROADS[3] - 76]]) {
+      const ped = createPed(G.rng, x, y, 'walker');
+      G.peds.push(ped);
+    }
     G.camera.x = car.x;
     G.camera.y = car.y;
     return;
   }
-  if (name === 'chase') {
-    // The Comet run, gone loud: three stars, interceptors converging, none landed yet.
+  if (name === 'night') {
+    // Two stars on the neon strip at midnight: headlights, strobes, wet-looking light.
+    G.dayHour = 23.15;
+    G.nightAmount = nightAmountFor(G.dayHour);
     G.cash = 1875;
-    G.dayHour = 16.9;
+    finishStory(D);
     G.addHeat(215);
-    D.missionIndex = 3;
-    D.introQueuedFor = 3;
-    D.stageIndex = 1;
-    D.stageSetupPending = false;
-    const car = createCar('sports', 1250, ROADS[4] + LANE_OFF, 0, '#d92b2b', G.rng);
-    car.missionCar = true;
+    const car = createCar('sports', ROADS[1] + 40, ROADS[3] + LANE_OFF, 0, '#3d7bd9', G.rng);
     car.driver = 'player';
-    car.vx = 400;
-    D.stageCar = car;
+    car.vx = 380;
     G.cars.push(car);
     G.player.car = car;
     G.player.x = car.x;
     G.player.y = car.y;
     const hunters = [
-      [car.x - 215, car.y - 4, 0],
-      [car.x - 370, car.y + 24, 0],
-      [car.x + 460, ROADS[4] - LANE_OFF, Math.PI],
+      [car.x - 150, car.y - 6, 0, 380],
+      [car.x - 300, car.y + 26, 0, 380],
+      [car.x + 520, ROADS[3] - LANE_OFF, Math.PI, -330],
     ];
-    for (const [x, y, angle] of hunters) {
+    for (const [x, y, angle, vx] of hunters) {
       const cop = createCar('police', x, y, angle, null, G.rng);
       cop.driver = 'police';
-      cop.vx = Math.cos(angle) * 330;
+      cop.vx = vx;
       G.cars.push(cop);
     }
-    const officer = createPed(G.rng, car.x + 330, car.y - 96, 'cop');
-    G.peds.push(officer);
+    const ahead = createCar('taxi', car.x + 430, ROADS[3] - LANE_OFF, Math.PI, null, G.rng);
+    ahead.driver = 'traffic';
+    ahead.ai.node = [2, 3];
+    G.cars.push(ahead);
     G.camera.x = car.x;
     G.camera.y = car.y;
     return;
   }
-  if (name === 'mission') {
-    // The first morning: Vera on the phone, her teal sedan waiting with its gold ring.
-    G.dayHour = 11.1;
-    D.introQueuedFor = 0;
-    D.queueDialogue(D.currentMission().intro);
-    const stage = D.currentStage();
-    if (stage !== null && stage.setup !== undefined) stage.setup(G, D);
-    D.stageSetupPending = false;
+  if (name === 'boat') {
+    // Golden hour on the water: a skiff planing east along the shore, wake behind.
+    G.dayHour = 17.9;
+    G.nightAmount = nightAmountFor(G.dayHour);
+    G.cash = 1640;
+    finishStory(D);
+    const boat = G.boats.find((b) => b.driver === 'docked');
+    boat.driver = 'player';
+    boat.x = 260;
+    boat.y = WORLD.h + 150;
+    boat.angle = 0.12;
+    G.player.boat = boat;
+    G.player.x = boat.x;
+    G.player.y = boat.y;
+    // The Sirena at anchor nearby, riding the same golden water.
+    const yacht = createBoat('yacht', 1560, WORLD.h + 330, -0.4, '#f2f0e6', G.rng);
+    yacht.driver = 'anchored';
+    G.boats.push(yacht);
+    G.camera.x = boat.x;
+    G.camera.y = boat.y;
+    return;
+  }
+  if (name === 'combat') {
+    // A shootout on foot at the big crossroads: three stars, two officers returning
+    // fire across the open asphalt, Jax mid-magazine with Vera's SMG in hand.
+    G.dayHour = 14.6;
+    G.nightAmount = nightAmountFor(G.dayHour);
+    G.cash = 980;
+    finishStory(D);
+    G.addHeat(320);
+    G.player.x = ROADS[3] - 120;
+    G.player.y = ROADS[3] + 40;
+    G.player.angle = 0;
+    G.player.hasSmg = true;
+    G.player.weapon = 'smg';
+    G.player.mag = 30;
+    G.player.magSize = 30;
+    G.player.reserve = 150;
+    const ride = createCar('sports', ROADS[3] - 210, ROADS[3] + LANE_OFF + 36, 0.2, '#d92b2b', G.rng);
+    G.cars.push(ride);
+    const patrol = createCar('police', ROADS[3] + 300, ROADS[3] - LANE_OFF, Math.PI, null, G.rng);
+    G.cars.push(patrol);
+    const copA = createPed(G.rng, ROADS[3] + 175, ROADS[3] + 52, 'cop');
+    copA.car = patrol;
+    const copB = createPed(G.rng, ROADS[3] + 90, ROADS[3] - 84, 'cop');
+    copB.car = patrol;
+    G.peds.push(copA, copB);
     G.camera.x = G.player.x;
     G.camera.y = G.player.y;
     return;
   }
-  // Unknown names fall back to the mission scene's quiet street.
-  arrangeShotScene('mission', G);
+  // Unknown names fall back to the combat scene's busy street.
+  arrangeShotScene('combat', G);
 }
 
 /** The scripted control for a scene: a function of elapsed seconds. */
 export function shotControl(name, G) {
-  if (name === 'drive') {
+  if (name === 'title') return () => IDLE;
+  if (name === 'night') {
     const car = G.player.car;
-    return laneControl(car, ROADS[3] + LANE_OFF, 4);
+    return laneControl(car, ROADS[3] + LANE_OFF, 10);
   }
-  if (name === 'chase') {
-    const car = G.player.car;
-    return laneControl(car, ROADS[4] + LANE_OFF, 16);
+  if (name === 'boat') {
+    const boat = G.player.boat;
+    return boatControl(boat, WORLD.h + 150);
+  }
+  if (name === 'combat') {
+    // Jax keeps firing at the nearest standing officer; the officers answer.
+    return () => {
+      const cop = G.peds.find((ped) => ped.role === 'cop' && !ped.dead);
+      return {
+        ...IDLE,
+        pointer: { down: true, wx: cop !== undefined ? cop.x : G.player.x + 120, wy: cop !== undefined ? cop.y : G.player.y },
+      };
+    };
   }
   return () => IDLE;
 }

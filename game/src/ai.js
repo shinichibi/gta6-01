@@ -5,7 +5,7 @@
 
 import { HEAT_DECAY, HEAT_HIDE_SECONDS, LANE_OFF, ROADS, ROAD_HALF, WORLD } from './config.js';
 import { nearestNode, randomRoadPoint } from './city.js';
-import { createCar, createPed, forwardSpeed, stepCar } from './entities.js';
+import { createBoat, createCar, createPed, forwardSpeed, stepBoat, stepCar } from './entities.js';
 import { angleDelta, clamp, dist } from './util.js';
 
 /** Pavement lines run this far outside each road's kerb, on both axes. */
@@ -85,7 +85,7 @@ export function manageTraffic(G, dt) {
     const spot = randomRoadPoint(G.rng, p, 820);
     if (dist(spot.x, spot.y, p.x, p.y) > 780) {
       const [ci, ri] = nearestNode(spot.x, spot.y);
-      const car = createCar(G.rng.pick(['sedan', 'hatch', 'sedan', 'taxi', 'van']), ROADS[ci], ROADS[ri], 0, null, G.rng);
+      const car = createCar(G.rng.pick(['sedan', 'hatch', 'sedan', 'taxi', 'van', 'pickup']), ROADS[ci], ROADS[ri], 0, null, G.rng);
       car.driver = 'traffic';
       car.ai.node = [ci, ri];
       car.ai.target = null;
@@ -153,16 +153,17 @@ export function managePeds(G, dt) {
   const p = G.player;
   G.peds = G.peds.filter((ped) => {
     if (ped.dead) return ped.downT > 0;
-    if (ped.role !== 'walker') return true;
+    if (ped.role !== 'walker' && ped.role !== 'jogger') return true;
     return dist(ped.x, ped.y, p.x, p.y) < 1400;
   });
-  const walkers = G.peds.filter((ped) => ped.role === 'walker' && !ped.dead);
-  if (walkers.length < 22 && G.pedT <= 0) {
+  const walkers = G.peds.filter((ped) => (ped.role === 'walker' || ped.role === 'jogger') && !ped.dead);
+  if (walkers.length < 24 && G.pedT <= 0) {
     G.pedT = 0.5;
     const vertical = G.rng.chance(0.5);
     const line = G.rng.pick(LINES);
     const t = clamp(p[vertical ? 'y' : 'x'] + G.rng.range(-950, 950), 40, WORLD.w - 40);
-    const ped = createPed(G.rng, vertical ? line : t, vertical ? t : line);
+    // One pavement user in five is a jogger, bright-shirted and twice the pace.
+    const ped = createPed(G.rng, vertical ? line : t, vertical ? t : line, G.rng.chance(0.2) ? 'jogger' : 'walker');
     ped.axis = vertical ? 'v' : 'h';
     G.peds.push(ped);
   }
@@ -219,7 +220,58 @@ export function updatePed(G, ped, dt) {
     }
     if (ped.x < 30 || ped.x > WORLD.w - 30) ped.dir *= -1;
   }
-  ped.walkCycle = (ped.walkCycle ?? 0) + dt * 7;
+  ped.walkCycle = (ped.walkCycle ?? 0) + dt * 7 * (ped.walkSpeed / 65);
+}
+
+// ---------------------------------------------------------------- harbour
+
+/** The ambient fleet's circuit: a wide rectangle of open water around the island. */
+const BOAT_LOOP = [
+  { x: -320, y: -320 },
+  { x: WORLD.w + 320, y: -320 },
+  { x: WORLD.w + 320, y: WORLD.h + 320 },
+  { x: -320, y: WORLD.h + 320 },
+];
+
+/** Keep two boats — a yacht and a skiff — endlessly circling the island. */
+export function manageBoats(G, dt) {
+  G.boatT -= dt;
+  const p = G.player;
+  G.boats = G.boats.filter((boat) => boat.driver !== 'ambient' || dist(boat.x, boat.y, p.x, p.y) < 2600);
+  const ambient = G.boats.filter((boat) => boat.driver === 'ambient' && !boat.wrecked);
+  if (ambient.length < 2 && G.boatT <= 0) {
+    G.boatT = 1.2;
+    const corner = G.rng.int(0, BOAT_LOOP.length - 1);
+    const at = BOAT_LOOP[corner];
+    if (dist(at.x, at.y, p.x, p.y) > 900) {
+      const type = ambient.some((boat) => boat.type === 'yacht') ? 'skiff' : 'yacht';
+      const boat = createBoat(type, at.x, at.y, 0, null, G.rng);
+      boat.driver = 'ambient';
+      boat.ai.wp = (corner + 1) % BOAT_LOOP.length;
+      G.boats.push(boat);
+    }
+  }
+}
+
+/** Steer one ambient boat around the island, laying a wake as it goes. */
+export function updateAmbientBoat(G, boat, dt) {
+  const target = BOAT_LOOP[boat.ai.wp];
+  if (dist(boat.x, boat.y, target.x, target.y) < 170) {
+    boat.ai.wp = (boat.ai.wp + 1) % BOAT_LOOP.length;
+    return;
+  }
+  const want = Math.atan2(target.y - boat.y, target.x - boat.x);
+  const delta = angleDelta(boat.angle, want);
+  const steer = clamp(delta * 1.8, -1, 1);
+  const speed = forwardSpeed(boat);
+  const wanted = boat.type === 'yacht' ? 195 : 250;
+  const throttle = speed < wanted ? 1 : 0;
+  stepBoat(boat, { throttle, steer, handbrake: false }, dt);
+  boat.ai.wakeT -= dt;
+  if (speed > 90 && boat.ai.wakeT <= 0) {
+    boat.ai.wakeT = 0.09;
+    G.fx.wake(boat.x - Math.cos(boat.angle) * boat.len * 0.5, boat.y - Math.sin(boat.angle) * boat.len * 0.5, boat.type === 'yacht');
+  }
 }
 
 /** Buildings and the shoreline stop a running pedestrian, as they stop anyone. */
@@ -246,7 +298,7 @@ function collidePavement(G, ped) {
 export function scarePeds(G, x, y, radius) {
   G.threat = { x, y };
   for (const ped of G.peds) {
-    if (ped.role === 'walker' && !ped.dead && dist(ped.x, ped.y, x, y) < radius) ped.panicT = Math.max(ped.panicT, 1.6);
+    if ((ped.role === 'walker' || ped.role === 'jogger') && !ped.dead && dist(ped.x, ped.y, x, y) < radius) ped.panicT = Math.max(ped.panicT, 1.6);
   }
 }
 

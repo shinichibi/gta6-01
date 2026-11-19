@@ -1,5 +1,6 @@
 // A tiny static server for game/ (Node 22, standard library only), so an entry can be played
 // locally without a build step: `node serve.ts` serves game/ on http://localhost:8080.
+// (Neon Tide v2 — streets, harbour and all — is the same plain files; nothing to build.)
 // It sends the MIME types a browser game needs, refuses any path outside game/, and otherwise
 // does nothing clever: this is a development convenience, not a web server for the internet.
 import { createReadStream, statSync } from 'node:fs';

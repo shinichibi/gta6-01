@@ -29,5 +29,13 @@ export function createRng(seed) {
     chance(p) {
       return next() < p;
     },
+    /** A random heading, in radians. */
+    angle() {
+      return next() * Math.PI * 2;
+    },
+    /** -1 or 1, coin-flip odds: which way along a shore, which side of a pier. */
+    sign() {
+      return next() < 0.5 ? -1 : 1;
+    },
   };
 }

@@ -1,24 +1,43 @@
-// Guns and consequences: the player's pistol, officers returning fire, bullets
-// against cars, people and walls, and what a fast car does to a slow pedestrian.
+// Guns and consequences: the player's two guns (pistol and Vera's Kite SMG),
+// officers returning fire, bullets against cars, boats, people and walls, and what
+// a fast car does to a slow pedestrian.
 
-import { HEAT } from './config.js';
+import { HEAT, WEAPON_ORDER, WEAPONS } from './config.js';
 import { lineBlocked } from './ai.js';
 import { dist } from './util.js';
 
 const BULLET_SPEED = 1450;
-const PLAYER_DAMAGE = 34;
 const COP_DAMAGE = 7;
 
 /** Fire one bullet; `from` is 'player' or 'cop'. Spread is in radians. */
-export function spawnBullet(G, x, y, angle, from, spread = 0) {
+export function spawnBullet(G, x, y, angle, from, spread = 0, damage = WEAPONS.pistol.damage) {
   const a = angle + (Math.random() - 0.5) * spread;
-  G.bullets.push({ x, y, vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, life: 0.55, from });
+  G.bullets.push({ x, y, vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, life: 0.55, from, dmg: damage });
   G.fx.muzzle(x, y, a);
 }
 
 /**
- * The player's pistol, driven by the loop: hold the mouse to fire, R (or an empty
- * magazine) to reload. Returns nothing; sounds and crime go through G's hooks.
+ * Swap to the other gun, keeping each weapon's own magazine and reserve. The SMG
+ * only exists once Vera has handed it over; the swap is a small ceremony — no
+ * swapping mid-reload.
+ */
+export function swapWeapon(G) {
+  const p = G.player;
+  if (!p.hasSmg || p.reloadT > 0) return;
+  p.ammo[p.weapon] = { mag: p.mag, reserve: p.reserve };
+  const idx = WEAPON_ORDER.indexOf(p.weapon);
+  p.weapon = WEAPON_ORDER[(idx + 1) % WEAPON_ORDER.length];
+  p.mag = p.ammo[p.weapon].mag;
+  p.reserve = p.ammo[p.weapon].reserve;
+  p.magSize = WEAPONS[p.weapon].magSize;
+  p.fireCd = Math.max(p.fireCd, 0.22);
+  G.audio.swap();
+}
+
+/**
+ * The player's gun, driven by the loop: hold the mouse to fire, R (or an empty
+ * magazine) to reload. Works on foot and from a boat's deck — never from a car.
+ * Sounds and crime go through G's hooks.
  */
 export function updatePlayerGun(G, dt, pointer, wantReload) {
   const p = G.player;
@@ -42,11 +61,15 @@ export function updatePlayerGun(G, dt, pointer, wantReload) {
     return;
   }
   if (p.fireCd > 0) return;
-  p.fireCd = 0.13;
+  const spec = WEAPONS[p.weapon];
+  p.fireCd = spec.rate;
   p.mag -= 1;
   const angle = Math.atan2(pointer.wy - p.y, pointer.wx - p.x);
   p.angle = angle;
-  spawnBullet(G, p.x + Math.cos(angle) * 16, p.y + Math.sin(angle) * 16, angle, 'player', 0.035);
+  const mx = p.x + Math.cos(angle) * 16;
+  const my = p.y + Math.sin(angle) * 16;
+  spawnBullet(G, mx, my, angle, 'player', spec.spread, spec.damage);
+  G.fx.flash(mx, my, 74, '#ffca7a', 0.07);
   G.audio.gunshot();
   G.onGunFired(p.x, p.y);
 }
@@ -59,7 +82,7 @@ export function updateCopFire(G) {
     if (ped.dead || ped.role !== 'cop') continue;
     const p = G.player;
     const angle = Math.atan2(p.y - ped.y, p.x - ped.x);
-    spawnBullet(G, ped.x + Math.cos(angle) * 14, ped.y + Math.sin(angle) * 14, angle, 'cop', 0.14);
+    spawnBullet(G, ped.x + Math.cos(angle) * 14, ped.y + Math.sin(angle) * 14, angle, 'cop', 0.14, COP_DAMAGE);
     G.audio.distantShot();
   }
 }
@@ -88,16 +111,29 @@ export function updateBullets(G, dt) {
     if (!spent && bullet.from === 'player') {
       for (const car of G.cars) {
         if (dist(bullet.x, bullet.y, car.x, car.y) < car.len * 0.42) {
-          car.hp -= 6;
+          car.hp -= Math.max(3, Math.round(bullet.dmg * 0.2));
+          car.flashT = 0.09;
           G.fx.sparks(bullet.x, bullet.y, 4);
           spent = true;
           break;
         }
       }
       if (!spent) {
+        for (const boat of G.boats) {
+          if (dist(bullet.x, bullet.y, boat.x, boat.y) < boat.len * 0.45) {
+            boat.hp -= Math.max(3, Math.round(bullet.dmg * 0.2));
+            boat.flashT = 0.09;
+            G.fx.sparks(bullet.x, bullet.y, 4);
+            spent = true;
+            break;
+          }
+        }
+      }
+      if (!spent) {
         for (const ped of G.peds) {
           if (ped.dead || dist(bullet.x, bullet.y, ped.x, ped.y) > ped.radius + 3) continue;
-          ped.hp -= PLAYER_DAMAGE;
+          ped.hp -= bullet.dmg;
+          ped.flashT = 0.09;
           G.fx.hitPuff(ped.x, ped.y);
           if (ped.hp <= 0) killPed(G, ped, true);
           else ped.panicT = Math.max(ped.panicT, 1.2);
@@ -107,11 +143,16 @@ export function updateBullets(G, dt) {
       }
     }
     if (!spent && bullet.from === 'cop') {
-      const target = p.car !== null ? p.car : p;
-      const radius = p.car !== null ? p.car.len * 0.42 : p.radius + 3;
+      const target = p.car !== null ? p.car : p.boat !== null ? p.boat : p;
+      const radius = p.car !== null ? p.car.len * 0.42 : p.boat !== null ? p.boat.len * 0.45 : p.radius + 3;
       if (dist(bullet.x, bullet.y, target.x, target.y) < radius) {
         if (p.car !== null) {
           p.car.hp -= 5;
+          p.car.flashT = 0.09;
+          G.fx.sparks(bullet.x, bullet.y, 4);
+        } else if (p.boat !== null) {
+          p.boat.hp -= 5;
+          p.boat.flashT = 0.09;
           G.fx.sparks(bullet.x, bullet.y, 4);
         } else {
           hurtPlayer(G, COP_DAMAGE);
@@ -135,7 +176,7 @@ export function killPed(G, ped, byPlayer) {
   }
 }
 
-/** Damage the player (on foot only; car hits are handled as car damage). */
+/** Damage the player (on foot only; vehicle hits are handled as vehicle damage). */
 export function hurtPlayer(G, amount) {
   const p = G.player;
   if (p.hp <= 0) return;

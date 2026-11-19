@@ -6,6 +6,11 @@
 // the kit's own library (vendor/makefun-game.ts, untouched) so the bytes match what the
 // scorer rebuilds for itself.
 //
+// Version 2 of the game (the harbour update: boats, a second gun, street races and the
+// night-lighting pass) changes nothing about the hand-in: the output directory is only
+// ever created if missing and filled — never removed — so the grader can run this twice
+// into the same directory and get identical bytes.
+//
 // Run it the way the grader does, with MAKEFUN_OUTPUT_DIR naming the output directory:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 // Play the game locally instead with: node serve.ts  (then open http://localhost:8080)

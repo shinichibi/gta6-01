@@ -7,6 +7,7 @@ export const ACTION_PAUSE = 2;
 export const ACTION_CONFIRM = 4;
 export const ACTION_RELOAD = 8;
 export const ACTION_MUTE = 16;
+export const ACTION_SWAP = 32;
 
 const KEYMAP = {
   KeyE: ACTION_INTERACT,
@@ -15,6 +16,7 @@ const KEYMAP = {
   KeyP: ACTION_PAUSE,
   Escape: ACTION_PAUSE,
   KeyM: ACTION_MUTE,
+  KeyQ: ACTION_SWAP,
 };
 
 export function createInput(canvas) {
